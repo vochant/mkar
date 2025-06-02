@@ -38,7 +38,7 @@ std::pair<size_t, unsigned char*> DArchive::decrypt_data(const unsigned char* in
     const byte* salt = in + 4;
     const byte* iv = in + SALT_SIZE + 4;
     const byte* cipherData = in + SALT_SIZE + IV_SIZE + 4;
-    size_t cipherLen = len - SALT_SIZE - IV_SIZE;
+    size_t cipherLen = len - SALT_SIZE - IV_SIZE - 4;
 
     unsigned int kix = 0;
     for (unsigned int i = 0; i < 4; i++) {
