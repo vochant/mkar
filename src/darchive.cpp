@@ -138,6 +138,7 @@ std::pair<size_t, unsigned char*> DArchive::extractData(unsigned int fsid, unsig
 
     unsigned char* data = new unsigned char[size];
     is.read((char*) data, size);
+    if (arcVersion == 1) mask.v2();
     mask.unmask(data, size);
     if (arcVersion == 1) {
         mask.unmask(data, size);

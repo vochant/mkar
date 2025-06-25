@@ -29,8 +29,10 @@ public:
 class Mask {
 public:
     unsigned char mapping[256], rmapping[256];
+    bool enableV2;
 public:
     void write(BitOutput& os);
+    void v2();
     void read(BitInput& is);
     void mask(void* buf, size_t len);
     void unmask(void* buf, size_t len);

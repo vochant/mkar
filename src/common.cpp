@@ -116,6 +116,7 @@ MaskTreap::MaskTreap() {
 }
 
 void Mask::write(BitOutput& os) {
+    enableV2 = true;
     MaskTreap treap;
     unsigned char limit = 128, len = 8;
     for (unsigned char i = 0, ci = 0; i < 255; i++, ci++) {
@@ -135,6 +136,7 @@ void Mask::write(BitOutput& os) {
 }
 
 void Mask::read(BitInput& is) {
+    enableV2 = false;
     MaskTreap treap;
     unsigned char limit = 128, len = 8;
     for (unsigned char i = 0, ci = 0; i < 255; i++, ci++) {
@@ -153,9 +155,14 @@ void Mask::read(BitInput& is) {
 }
 
 void Mask::mask(void* buf, size_t len) {
+    unsigned short e = 1;
     unsigned char* buffer = (unsigned char*) buf;
     for (long long i = 1; i < len; i++) buffer[i] += buffer[i - 1];
     for (long long i = 0; i < len; i++) buffer[i] = mapping[buffer[i]];
+    if (enableV2) for (long long i = 0; i < len; i++) {
+        buffer[i] += e;
+        e = ((e * 101) & 255);
+    }
     for (long long i = 1; i < len; i++) buffer[i] ^= buffer[i - 1];
     for (long long i = len - 1; i > 0; i--) {
         long long lb = ((i + 1) & -(i + 1));
@@ -164,12 +171,21 @@ void Mask::mask(void* buf, size_t len) {
 }
 
 void Mask::unmask(void* buf, size_t len) {
+    unsigned short e = 1;
     unsigned char* buffer = (unsigned char*) buf;
     for (long long i = 1; i < len; i++) {
         long long lb = ((i + 1) & -(i + 1));
         if (lb != i + 1) buffer[i] ^= buffer[i - lb];
     }
     for (long long i = len - 1; i > 0; i--) buffer[i] ^= buffer[i - 1];
+    if (enableV2) for (long long i = 0; i < len; i++) {
+        buffer[i] -= e;
+        e = ((e * 101) & 255);
+    }
     for (long long i = 0; i < len; i++) buffer[i] = rmapping[buffer[i]];
     for (long long i = len - 1; i > 0; i--) buffer[i] -= buffer[i - 1];
+}
+
+void Mask::v2() {
+    enableV2 = true;
 }
