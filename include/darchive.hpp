@@ -18,6 +18,7 @@ private:
     std::vector<std::tuple<unsigned int, std::string, std::string>> tasks;
     std::ifstream is;
     bool good, safeMode;
+    int arcVersion;
     std::queue<std::pair<unsigned int, std::filesystem::path>> routines;
 private:
     std::pair<size_t, unsigned char*> decompress_data(const unsigned char* in, size_t len);

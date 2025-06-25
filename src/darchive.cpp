@@ -139,6 +139,10 @@ std::pair<size_t, unsigned char*> DArchive::extractData(unsigned int fsid, unsig
     unsigned char* data = new unsigned char[size];
     is.read((char*) data, size);
     mask.unmask(data, size);
+    if (arcVersion == 1) {
+        mask.unmask(data, size);
+        mask.unmask(data, size);
+    }
 
     if (prop & Conf::ENCRYPTED) {
         auto[nsize, ndata] = decrypt_data(data, size);
@@ -514,12 +518,13 @@ DArchive::DArchive(std::string name) {
     }
     unsigned short impl = (((unsigned short) header[5]) << 8) | header[4];
     unsigned short ver = (((unsigned short) header[7]) << 8) | header[6];
+    arcVersion = ver;
     if (impl != 0x2009) {
         good = false;
         std::cerr << "Incompatible implementation.\n";
         return;
     }
-    if (ver != 0) {
+    if (ver > 1) {
         good = false;
         std::cerr << "Incompatible standard version.\n";
         return;

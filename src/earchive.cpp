@@ -186,6 +186,8 @@ void EArchive::AddPath(std::filesystem::path path, unsigned int fsid) {
     }
 
     mask.mask(content, fsize);
+    mask.mask(content, fsize);
+    mask.mask(content, fsize);
     os.write((const char*) content, fsize);
 
     fileNames.push_back(path.filename().string());
@@ -315,7 +317,7 @@ EArchive::EArchive(std::string out) {
 
     static unsigned char headers[] = {
         'M', 'K', 'A', 'R',
-        0x09, 0x20, 0x00, 0x00,
+        0x09, 0x20, 0x01, 0x00,
         0x00, 0x00, 0x00, 0x00,
         0x00, 0x00, 0x00, 0x00
     };
