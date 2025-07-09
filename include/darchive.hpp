@@ -9,7 +9,7 @@
 class DArchive {
 private:
     unsigned int fileCount;
-    unsigned int fstOffset;
+    unsigned long long fstOffset;
     std::vector<std::string> fileNames;
     std::vector<unsigned int> rootdir;
     std::vector<size_t> fileSizes;

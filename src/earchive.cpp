@@ -12,6 +12,7 @@
 #include <cryptopp/hex.h>
 #include <cryptopp/secblock.h>
 #include <cstring>
+#include <iostream>
 
 std::pair<size_t, unsigned char*> EArchive::compress_data(const unsigned char* in, size_t len) {
     size_t compressBound = ZSTD_compressBound(len);
@@ -79,7 +80,7 @@ std::pair<size_t, unsigned char*> EArchive::encrypt_data(const unsigned char* in
 void EArchive::AddPath(std::filesystem::path path, unsigned int fsid) {
     std::error_code ec;
     unsigned char prop = 0;
-    auto it = props.find(path.lexically_normal().generic_string());
+    auto it = props.find(path.lexically_normal().generic_u8string());
     if (it != props.end()) prop = it->second;
     prop |= maskProp;
 
@@ -128,7 +129,7 @@ void EArchive::AddPath(std::filesystem::path path, unsigned int fsid) {
         fsize = size + ((prop & Conf::SCRIPT) ? 4 : 0);
 
         if (prop & Conf::SCRIPT) {
-            auto it = execpri.find(path.lexically_normal().generic_string());
+            auto it = execpri.find(path.lexically_normal().generic_u8string());
             if (it == execpri.end()) {
                 good = false;
                 delete[] content;
@@ -143,7 +144,7 @@ void EArchive::AddPath(std::filesystem::path path, unsigned int fsid) {
         if (prop & Conf::SYMLINK) {
             std::string p((char*) content, fsize);
             std::filesystem::path pth(p);
-            auto it = pth2fsid.find(pth.lexically_normal().generic_string());
+            auto it = pth2fsid.find(pth.lexically_normal().generic_u8string());
             if (it == pth2fsid.end()) {
                 good = false;
                 delete[] content;
@@ -171,7 +172,7 @@ void EArchive::AddPath(std::filesystem::path path, unsigned int fsid) {
     }
 
     if (prop & Conf::ENCRYPTED) {
-        auto it = enckix.find(path.lexically_normal().generic_string());
+        auto it = enckix.find(path.lexically_normal().generic_u8string());
         unsigned int kix;
         if (it == enckix.end()) kix = 0;
         else kix = it->second;
@@ -185,12 +186,13 @@ void EArchive::AddPath(std::filesystem::path path, unsigned int fsid) {
         fsize = nfsize;
     }
 
+    std::cout << "Add " << path.lexically_normal().generic_u8string() << '\n';
     mask.mask(content, fsize);
     mask.mask(content, fsize);
     mask.mask(content, fsize);
     os.write((const char*) content, fsize);
 
-    fileNames.push_back(path.filename().string());
+    fileNames.push_back(path.filename().u8string());
     fileOffsets.push_back(prevSize);
     prevSize += 225 + fsize;
 
@@ -202,14 +204,16 @@ void EArchive::MaskProp(unsigned char prop) {
 }
 
 void EArchive::AddProp(std::filesystem::path path, unsigned char prop) {
-    auto it = props.find(path.lexically_normal().generic_string());
+    auto it = props.find(path.lexically_normal().generic_u8string());
     if (it != props.end()) it->second |= prop;
-    else props.insert({path.lexically_normal().generic_string(), prop});
+    else props.insert({path.lexically_normal().generic_u8string(), prop});
 }
 
 bool EArchive::isGood() { return good; }
 
 void EArchive::FSTable() {
+    std::cout << "Added " << fileCount << " files\n";
+    std::cout << "Creating the FS Table\n";
     for (unsigned int i = 0; i < fileCount; i++) {
         unsigned short fnsize = fileNames[i].length();
         for (size_t j = 0; j < 2; j++) {
@@ -231,6 +235,7 @@ void EArchive::FSTable() {
 
     os.seekp(8, std::ios::beg);
     unsigned long long fstOffset = prevSize;
+    std::cout << "Offset: " << fstOffset << '\n';
     for (size_t j = 0; j < 8; j++) {
         unsigned char ch = (fstOffset >> (j << 3)) & 0xff;
         os.write((char*) &ch, 1);
@@ -241,7 +246,7 @@ void EArchive::RunRoutines() {
     while (!routines.empty()) {
         auto pth = routines.front();
         routines.pop();
-        AddPath(pth, pth2fsid[pth.lexically_normal().generic_string()]);
+        AddPath(pth, pth2fsid[pth.lexically_normal().generic_u8string()]);
         if (!good) return;
     }
 }
@@ -255,7 +260,7 @@ void EArchive::SetKey(unsigned int key, std::string val) {
 }
 
 void EArchive::SetKix(std::filesystem::path path, unsigned int kix) {
-    auto pth = path.lexically_normal().generic_string();
+    auto pth = path.lexically_normal().generic_u8string();
     if (enckix.find(pth) != enckix.end()) {
         good = false;
         return;
@@ -264,7 +269,7 @@ void EArchive::SetKix(std::filesystem::path path, unsigned int kix) {
 }
 
 void EArchive::SetExecPri(std::filesystem::path path, unsigned int pri) {
-    auto pth = path.lexically_normal().generic_string();
+    auto pth = path.lexically_normal().generic_u8string();
     if (execpri.find(pth) != execpri.end()) {
         good = false;
         return;
@@ -278,12 +283,12 @@ void EArchive::AddRoutine(std::filesystem::path path, bool isRoot) {
     unsigned int selfId = fileCount++;
     subs.push_back({});
 
-    if (pth2fsid.find(path.lexically_normal().generic_string()) != pth2fsid.end()) {
+    if (pth2fsid.find(path.lexically_normal().generic_u8string()) != pth2fsid.end()) {
         good = false;
         return;
     }
 
-    pth2fsid.insert({path.lexically_normal().generic_string(), selfId});
+    pth2fsid.insert({path.lexically_normal().generic_u8string(), selfId});
 
     std::error_code ec;
     if (std::filesystem::is_directory(path, ec)) {

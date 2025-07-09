@@ -198,6 +198,8 @@ void DArchive::FSTable() {
     for (unsigned int i = 0; i < fileCount; i++) {
         fileSizes.push_back(fileOffsets[i + 1] - fileOffsets[i] - 225);
     }
+
+    std::cout << "Got " << fileCount << " files.\n";
 }
 
 void DArchive::TestRootdir() {
@@ -219,7 +221,7 @@ std::vector<std::string> extract_segments(const std::filesystem::path& raw_path)
 
     for (const auto& part : normalized) {
         if (part != "/" && part != "\\" && part != "" && !part.has_root_name() && !part.has_root_directory()) {
-            segments.push_back(part.string());
+            segments.push_back(part.u8string());
         }
     }
 
@@ -248,6 +250,7 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
     }
 
     if (prop & Conf::PATH) {
+        std::cout << "Create   " << path.lexically_normal().generic_u8string() << '\n';
         std::filesystem::create_directory(path, ec);
         if (ec) {
             good = false;
@@ -268,7 +271,7 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
                 delete[] data;
                 return;
             }
-            Extract(nfsid, path / fileNames[nfsid]);
+            Extract(nfsid, path / std::filesystem::u8path(fileNames[nfsid]));
             if (!good) {
                 delete[] data;
                 return;
@@ -289,8 +292,11 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
                 pri |= (((unsigned int) data[i]) << (i << 3));
             }
             std::string script((char*) (data + 4), size - 4);
-            if (pri == 0) RunPostScript(script, path.lexically_normal().generic_string());
-            else tasks.push_back({pri, script, path.lexically_normal().generic_string()});
+            if (pri == 0) {
+                std::cout << "Execute  " << path.lexically_normal().generic_u8string() << '\n';
+                RunPostScript(script, path.lexically_normal().generic_u8string());
+            }
+            else tasks.push_back({pri, script, path.lexically_normal().generic_u8string()});
             delete[] data;
             return;
         }
@@ -299,6 +305,7 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
     if ((prop & Conf::NETWORK) && !safeMode) {
         std::string url((char*) data, size);
         delete[] data;
+        std::cout << "Download " << path.lexically_normal().generic_u8string() << " (" << url << ")\n";
         if (!download(url, path)) {
             std::cerr << "Leaving the URL...\n";
             std::ofstream os(path, std::ios::binary);
@@ -308,6 +315,7 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
         return;
     }
 
+    std::cout << "Extract  " << path.lexically_normal().generic_u8string() << '\n';
     std::ofstream os(path, std::ios::binary);
     os.write((char*) data, size);
     os.close();
@@ -394,13 +402,14 @@ void DArchive::PostExtract() {
         return std::get<0>(a) > std::get<0>(b);
     });
     for (auto[pri, src, title] : tasks) {
+        std::cout << "Execute  " << src << '\n';
         RunPostScript(src, title);
     }
 }
 
 void DArchive::ExtractAll() {
     for (auto x : rootdir) {
-        Extract(x, fileNames[x]);
+        Extract(x, std::filesystem::u8path(fileNames[x]));
         if (!good) return;
     }
 }
@@ -519,6 +528,7 @@ DArchive::DArchive(std::string name) {
     }
     unsigned short impl = (((unsigned short) header[5]) << 8) | header[4];
     unsigned short ver = (((unsigned short) header[7]) << 8) | header[6];
+    std::cout << "Implementation: " << impl << "\nStandard Version: " << ver << '\n';
     arcVersion = ver;
     if (impl != 0x2009) {
         good = false;
@@ -535,6 +545,8 @@ DArchive::DArchive(std::string name) {
     for (int i = 0; i < 8; i++) {
         fstOffset |= (((unsigned long long) header[i + 8]) << (i << 3));
     }
+
+    std::cout << "Offset: " << fstOffset << '\n';
 }
 
 DArchive::~DArchive() {
