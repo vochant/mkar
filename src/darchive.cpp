@@ -15,6 +15,77 @@
 #include <curl/curl.h>
 #include <cstring>
 #include <iostream>
+#include <stdlib.h>
+
+#ifdef _WIN32
+# include <windows.h>
+# include <winhttp.h>
+# pragma comment(lib, "winhttp.lib")
+#endif
+
+char* proxy_string = NULL;
+bool proxy_detected = false;
+
+char* get_system_proxy_for_curl() {
+    if (proxy_detected) return proxy_string;
+    proxy_detected = true;
+
+    const char* env_proxy = getenv("http_proxy");
+    if (!env_proxy) {
+        env_proxy = getenv("https_proxy");
+    }
+
+    if (env_proxy) {
+        proxy_string = _strdup(env_proxy);
+        if (proxy_string) {
+            if (proxy_string) printf("Detected http_proxy: %s\n", proxy_string);
+            return proxy_string;
+        } else {
+            return NULL;
+        }
+    }
+
+#ifdef _WIN32
+    WINHTTP_CURRENT_USER_IE_PROXY_CONFIG ieProxyConfig;
+    ZeroMemory(&ieProxyConfig, sizeof(ieProxyConfig));
+
+    if (WinHttpGetIEProxyConfigForCurrentUser(&ieProxyConfig)) {
+        if (ieProxyConfig.lpszProxy) {
+            int buffer_len = WideCharToMultiByte(CP_UTF8, 0, ieProxyConfig.lpszProxy, -1, NULL, 0, NULL, NULL);
+            if (buffer_len > 0) {
+                proxy_string = (char*)malloc(buffer_len);
+                if (proxy_string) {
+                    WideCharToMultiByte(CP_UTF8, 0, ieProxyConfig.lpszProxy, -1, proxy_string, buffer_len, NULL, NULL);
+                    printf("Detected IE Proxy: %s\n", proxy_string);
+                }
+            }
+        }
+        if (ieProxyConfig.lpszAutoConfigUrl) GlobalFree(ieProxyConfig.lpszAutoConfigUrl);
+        if (ieProxyConfig.lpszProxy) GlobalFree(ieProxyConfig.lpszProxy);
+        if (ieProxyConfig.lpszProxyBypass) GlobalFree(ieProxyConfig.lpszProxyBypass);
+    } else {
+        WINHTTP_PROXY_INFO proxyInfo;
+        ZeroMemory(&proxyInfo, sizeof(proxyInfo));
+        if (WinHttpGetDefaultProxyConfiguration(&proxyInfo)) {
+            if (proxyInfo.lpszProxy) {
+                int buffer_len = WideCharToMultiByte(CP_UTF8, 0, proxyInfo.lpszProxy, -1, NULL, 0, NULL, NULL);
+                if (buffer_len > 0) {
+                    proxy_string = (char*)malloc(buffer_len);
+                    if (proxy_string) {
+                        WideCharToMultiByte(CP_UTF8, 0, proxyInfo.lpszProxy, -1, proxy_string, buffer_len, NULL, NULL);
+                        printf("Detected WinHTTP Proxy: %s\n", proxy_string);
+                    }
+                }
+            }
+            if (proxyInfo.lpszProxy) GlobalFree(proxyInfo.lpszProxy);
+            if (proxyInfo.lpszProxyBypass) GlobalFree(proxyInfo.lpszProxyBypass);
+        }
+    }
+#endif
+
+    return proxy_string;
+}
+
 
 std::pair<size_t, unsigned char*> DArchive::decompress_data(const unsigned char* in, size_t len) {
     size_t decompressBound = ZSTD_getFrameContentSize(in, len);
@@ -84,12 +155,16 @@ std::pair<size_t, unsigned char*> DArchive::decrypt_data(const unsigned char* in
 }
 
 size_t write_data(void* ptr, size_t size, size_t nmemb, void* stream) {
-    std::ofstream* out = static_cast<std::ofstream*>(stream);
-    out->write((char*)ptr, size * nmemb);
+    std::ofstream& out = *reinterpret_cast<std::ofstream*>(stream);
+    out.write((char*)ptr, size * nmemb);
     return size * nmemb;
 }
 
 bool DArchive::download(std::string url, std::filesystem::path save) {
+    if (!curlState) {
+        curl_global_init(CURL_GLOBAL_DEFAULT);
+    }
+    
     CURL* curl = curl_easy_init();
     if (!curl) {
         std::cerr << "Download file failed: Unable to initialize CURL.\n";
@@ -101,6 +176,12 @@ bool DArchive::download(std::string url, std::filesystem::path save) {
         std::cerr << "Download file failed: Unable to open the output file.\n";
         return false;
     }
+
+    char* _p = get_system_proxy_for_curl();
+    curl_easy_setopt(curl, CURLOPT_PROXY, _p);
+    if (!curlState && _p) printf("Using proxy server: %s\n", _p);
+
+    if (!curlState) curlState = true;
 
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
@@ -303,6 +384,7 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
     }
 
     if ((prop & Conf::NETWORK) && !safeMode) {
+        while (isspace(data[size - 1])) size--;
         std::string url((char*) data, size);
         delete[] data;
         std::cout << "Download " << path.lexically_normal().generic_u8string() << " (" << url << ")\n";
@@ -515,6 +597,7 @@ std::string DArchive::getName(unsigned int fsid) {
 unsigned int DArchive::FSCount() { return fileCount; }
 
 DArchive::DArchive(std::string name) {
+    curlState = false;
     good = true;
     fileCount = 0;
     safeMode = false;
@@ -550,5 +633,6 @@ DArchive::DArchive(std::string name) {
 }
 
 DArchive::~DArchive() {
+    if (curlState) curl_global_cleanup();
     is.close();
 }

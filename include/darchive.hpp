@@ -17,7 +17,7 @@ private:
     std::map<unsigned int, std::string> keys;
     std::vector<std::tuple<unsigned int, std::string, std::string>> tasks;
     std::ifstream is;
-    bool good, safeMode;
+    bool good, safeMode, curlState;
     int arcVersion;
     std::queue<std::pair<unsigned int, std::filesystem::path>> routines;
 private:
