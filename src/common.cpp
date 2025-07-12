@@ -115,8 +115,80 @@ MaskTreap::MaskTreap() {
     }
 }
 
+class SplitMix64 {
+private:
+    unsigned long long state;
+public:
+    explicit SplitMix64(unsigned long long seed) : state(seed) {}
+    unsigned long long next() {
+        unsigned long long z = (state += 0x9E3779B97F4A7C15ULL);
+        z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+        z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+        return z ^ (z >> 31);
+    }
+};
+
+class Xoshiro256pp {
+private:
+    unsigned long long s[4];
+
+    static inline unsigned long long rotl(const unsigned long long x, int k) {
+        return (x << k) | (x >> (64 - k));
+    }
+
+public:
+    explicit Xoshiro256pp(unsigned long long seed) {
+        SplitMix64 sm64(seed);
+        for (int i = 0; i < 4; i++) {
+            s[i] = sm64.next();
+        }
+    }
+
+    unsigned long long next() {
+        const unsigned long long result = rotl(s[0] + s[3], 23) + s[0];
+
+        const unsigned long long t = s[1] << 17;
+
+        s[2] ^= s[0];
+        s[3] ^= s[1];
+        s[1] ^= s[2];
+        s[0] ^= s[3];
+
+        s[2] ^= t;
+
+        s[3] = rotl(s[3], 45);
+
+        return result;
+    }
+};
+
+class Xoshiro256ppByteStream {
+private:
+    Xoshiro256pp rng;
+    unsigned char buffer[8];
+    int buffer_index;
+
+    void refill_buffer() {
+        unsigned long long val = rng.next();
+        for (int i = 0; i < 8; ++i) {
+            buffer[i] = ((val >> (56 - 8 * i)) & 0xFF);
+        }
+        buffer_index = 0;
+    }
+
+public:
+    explicit Xoshiro256ppByteStream(unsigned long long seed) : rng(seed), buffer_index(8) {}
+
+    unsigned char next_byte() {
+        if (buffer_index >= 8) {
+            refill_buffer();
+        }
+        return buffer[buffer_index++];
+    }
+};
+
 void Mask::write(BitOutput& os) {
-    enableV2 = true;
+    version = 2;
     MaskTreap treap;
     unsigned char limit = 128, len = 8;
     for (unsigned char i = 0, ci = 0; i < 255; i++, ci++) {
@@ -136,7 +208,7 @@ void Mask::write(BitOutput& os) {
 }
 
 void Mask::read(BitInput& is) {
-    enableV2 = false;
+    version = 0;
     MaskTreap treap;
     unsigned char limit = 128, len = 8;
     for (unsigned char i = 0, ci = 0; i < 255; i++, ci++) {
@@ -155,13 +227,35 @@ void Mask::read(BitInput& is) {
 }
 
 void Mask::mask(void* buf, size_t len) {
-    unsigned short e = 1;
     unsigned char* buffer = (unsigned char*) buf;
-    for (long long i = 1; i < len; i++) buffer[i] += buffer[i - 1];
-    for (long long i = 0; i < len; i++) buffer[i] = mapping[buffer[i]];
-    if (enableV2) for (long long i = 0; i < len; i++) {
-        buffer[i] += e;
-        e = ((e * 101) & 255);
+    if (version < 2) {
+        for (long long i = 1; i < len; i++) buffer[i] += buffer[i - 1];
+        for (long long i = 0; i < len; i++) buffer[i] = mapping[buffer[i]];
+    }
+    if (version == 1) {
+        unsigned short e = 1;
+        for (long long i = 0; i < len; i++) {
+            buffer[i] += e;
+            e = ((e * 101) & 255);
+        }
+    }
+    else if (version == 2) {
+        unsigned long long seed = 0;
+        for (int i = 0; i <= 7; i++) {
+            seed |= (((unsigned long long) mapping[i << 2]) << (i << 3));
+        }
+        Xoshiro256ppByteStream bs(seed);
+        for (long long i = 0; i < len; i++) {
+            buffer[i] += bs.next_byte();
+        }
+    }
+    if (version >= 2) {
+        unsigned char acc = 10;
+        for (int i = 0; i < len; i++) {
+            buffer[i] = mapping[(buffer[i] + acc) & 0xFF];
+            acc ^= buffer[i];
+        }
+        for (long long i = 0; i < len; i++) buffer[i] = mapping[buffer[i]];
     }
     for (long long i = 1; i < len; i++) buffer[i] ^= buffer[i - 1];
     for (long long i = len - 1; i > 0; i--) {
@@ -171,21 +265,45 @@ void Mask::mask(void* buf, size_t len) {
 }
 
 void Mask::unmask(void* buf, size_t len) {
-    unsigned short e = 1;
     unsigned char* buffer = (unsigned char*) buf;
     for (long long i = 1; i < len; i++) {
         long long lb = ((i + 1) & -(i + 1));
         if (lb != i + 1) buffer[i] ^= buffer[i - lb];
     }
     for (long long i = len - 1; i > 0; i--) buffer[i] ^= buffer[i - 1];
-    if (enableV2) for (long long i = 0; i < len; i++) {
-        buffer[i] -= e;
-        e = ((e * 101) & 255);
+    if (version >= 2) {
+        for (long long i = 0; i < len; i++) buffer[i] = rmapping[buffer[i]];
+        unsigned char acc = 10;
+        for (int i = 0; i < len; i++) {
+            unsigned char y = buffer[i];
+            unsigned char x = (rmapping[buffer[i]] - acc) & 0xFF;
+            buffer[i] = x;
+            acc ^= y;
+        }
     }
-    for (long long i = 0; i < len; i++) buffer[i] = rmapping[buffer[i]];
-    for (long long i = len - 1; i > 0; i--) buffer[i] -= buffer[i - 1];
+    if (version == 1) {
+        unsigned short e = 1;
+        for (long long i = 0; i < len; i++) {
+            buffer[i] -= e;
+            e = ((e * 101) & 255);
+        }
+    }
+    else if (version == 2) {
+        unsigned long long seed = 0;
+        for (int i = 0; i <= 7; i++) {
+            seed |= (((unsigned long long) mapping[i << 2]) << (i << 3));
+        }
+        Xoshiro256ppByteStream bs(seed);
+        for (long long i = 0; i < len; i++) {
+            buffer[i] -= bs.next_byte();
+        }
+    }
+    if (version < 2) {
+        for (long long i = 0; i < len; i++) buffer[i] = rmapping[buffer[i]];
+        for (long long i = len - 1; i > 0; i--) buffer[i] -= buffer[i - 1];
+    }
 }
 
-void Mask::v2() {
-    enableV2 = true;
+void Mask::versionId(int version) {
+    this->version = version;
 }
