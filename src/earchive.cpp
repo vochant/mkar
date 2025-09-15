@@ -1,6 +1,7 @@
 #include "earchive.hpp"
 #include "conf.hpp"
 #include "mask.hpp"
+#include "platform.hpp"
 #include <zstd.h>
 #include <cryptopp/cryptlib.h>
 #include <cryptopp/aes.h>
@@ -14,6 +15,18 @@
 #include <cstring>
 #include <iostream>
 
+class EArchiveException : public std::exception {
+private:
+    std::string desc;
+
+public:
+    EArchiveException(const std::string desc) : desc("EArchive: " + desc) {}
+
+    const char* what() const noexcept {
+        return desc.c_str();
+    }
+};
+
 std::pair<size_t, unsigned char*> EArchive::compress_data(const unsigned char* in, size_t len) {
     size_t compressBound = ZSTD_compressBound(len);
     unsigned char* out = new unsigned char[compressBound];
@@ -21,7 +34,7 @@ std::pair<size_t, unsigned char*> EArchive::compress_data(const unsigned char* i
 
     if (ZSTD_isError(compressedSize)) {
         delete[] out;
-        return {0, nullptr};
+        throw EArchiveException("Compression failed: " + std::string(ZSTD_getErrorName(compressedSize)));
     }
 
     return {compressedSize, out};
@@ -35,7 +48,7 @@ std::pair<size_t, unsigned char*> EArchive::encrypt_data(const unsigned char* in
     if (it != keys.end()) {
         password = it->second;
     }
-    else return {0, nullptr};
+    else throw EArchiveException("Missing password for key index: " + std::to_string(kix));
 
     AutoSeededRandomPool rng;
 
@@ -108,14 +121,14 @@ void EArchive::AddPath(std::filesystem::path path, unsigned int fsid) {
         fsize = (subcount + 1) * 4;
     }
     else {
-        size_t size = std::filesystem::file_size(path, ec);
+        size_t size = std::filesystem::file_size(toPlatformPath(path), ec);
         if (ec) {
             good = false;
             return;
         }
         if (prop & Conf::SCRIPT) content = new unsigned char[size + 4];
         else content = new unsigned char[size];
-        std::ifstream file(path, std::ios::binary);
+        std::ifstream file(toPlatformPath(path), std::ios::binary);
         if (!file) {
             good = false;
             delete[] content;
@@ -146,9 +159,8 @@ void EArchive::AddPath(std::filesystem::path path, unsigned int fsid) {
             std::filesystem::path pth(p);
             auto it = pth2fsid.find(pth.lexically_normal().generic_u8string());
             if (it == pth2fsid.end()) {
-                good = false;
                 delete[] content;
-                return;
+                throw EArchiveException("Symlink target not found: " + pth.lexically_normal().generic_u8string());
             }
             fsize = 4;
             delete[] content;
@@ -192,7 +204,7 @@ void EArchive::AddPath(std::filesystem::path path, unsigned int fsid) {
     mask.mask(content, fsize);
     os.write((const char*) content, fsize);
 
-    fileNames.push_back(path.filename().u8string());
+    fileNames.push_back((path.has_filename() ? path : path.parent_path()).filename().u8string());
     fileOffsets.push_back(prevSize);
     prevSize += 225 + fsize;
 
@@ -272,7 +284,7 @@ void EArchive::SetExecPri(std::filesystem::path path, unsigned int pri) {
     auto pth = path.lexically_normal().generic_u8string();
     if (execpri.find(pth) != execpri.end()) {
         good = false;
-        return;
+        throw EArchiveException("Duplicate exec priority for: " + pth);
     }
     execpri.insert({pth, pri});
 }
@@ -285,18 +297,18 @@ void EArchive::AddRoutine(std::filesystem::path path, bool isRoot) {
 
     if (pth2fsid.find(path.lexically_normal().generic_u8string()) != pth2fsid.end()) {
         good = false;
-        return;
+        throw EArchiveException("Duplicate path: " + path.lexically_normal().generic_u8string());
     }
 
     pth2fsid.insert({path.lexically_normal().generic_u8string(), selfId});
 
     std::error_code ec;
-    if (std::filesystem::is_directory(path, ec)) {
+    if (std::filesystem::is_directory(toPlatformPath(path), ec)) {
         AddProp(path, Conf::PATH);
-        auto dit = std::filesystem::directory_iterator(path, ec);
+        auto dit = std::filesystem::directory_iterator(toPlatformPath(path), ec);
         if (ec) {
             good = false;
-            return;
+            throw EArchiveException("Cannot open directory: " + path.lexically_normal().generic_u8string());
         }
         for (const auto& entry : dit) {
             subs[selfId].push_back(fileCount);
@@ -306,7 +318,7 @@ void EArchive::AddRoutine(std::filesystem::path path, bool isRoot) {
     }
     if (ec) {
         good = false;
-        return;
+        throw EArchiveException("Cannot test if " + toPlatformPath(path).u8string() + " is a directory");
     }
 }
 
@@ -314,7 +326,7 @@ EArchive::EArchive(std::string out) {
     good = true;
     maskProp = 0;
 
-    os.open(out, std::ios::binary);
+    os.open(toPlatformPath(out), std::ios::binary);
     if (!os) {
         good = false;
         return;

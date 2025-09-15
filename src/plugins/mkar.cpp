@@ -1,3 +1,5 @@
+#define LIB_EXPORTS
+
 #include "plugins/plugin.hpp"
 #include "object/integer.hpp"
 #include "object/string.hpp"
@@ -5,6 +7,8 @@
 #include "vm_error.hpp"
 #include "darchive.hpp"
 #include "vm/vm.hpp"
+
+std::function<bool(unsigned int)> onMissingPassword, onIncorrectPassword;
 
 DArchive* g_arch;
 

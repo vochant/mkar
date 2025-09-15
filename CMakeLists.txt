@@ -4,6 +4,8 @@ project(mpcc LANGUAGES CXX VERSION 0.1.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+
 add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/EHsc>")
 add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/source-charset:utf-8>")
 add_compile_options("$<$<CXX_COMPILER_ID:MSVC>:/execution-charset:utf-8>")
@@ -33,27 +35,32 @@ set(LIBRARY_SOURCES
     src/common.cpp
     src/earchive.cpp
     src/darchive.cpp
+    src/platform.cpp
 )
 
 set(PROGRAM_SOURCES src/main.cpp)
 
-add_library(mkarlib OBJECT ${LIBRARY_SOURCES})
-target_include_directories(mkarlib PUBLIC
+add_library(libmkar SHARED ${LIBRARY_SOURCES})
+target_include_directories(libmkar PUBLIC
     include
     ${PROJECT_BINARY_DIR}
 )
+
+set_target_properties(libmkar PROPERTIES OUTPUT_NAME "mkar")
 
 find_package(zstd CONFIG REQUIRED)
 find_package(cryptopp CONFIG REQUIRED)
 find_package(CURL REQUIRED)
 
-target_link_libraries(mkarlib PUBLIC zstd::libzstd cryptopp::cryptopp CURL::libcurl)
+target_link_libraries(libmkar PUBLIC zstd::libzstd cryptopp::cryptopp CURL::libcurl)
 
 add_executable(mkar ${PROGRAM_SOURCES})
+
+set_target_properties(mkar PROPERTIES OUTPUT_NAME "mkar")
 
 if(WIN32)
     enable_language(RC)
     target_sources(mkar PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/resources.rc)
 endif()
 
-target_link_libraries(mkar PRIVATE mkarlib)
+target_link_libraries(mkar PRIVATE libmkar)

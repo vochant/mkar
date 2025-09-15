@@ -1,6 +1,7 @@
 #include "darchive.hpp"
 #include "conf.hpp"
 #include "mask.hpp"
+#include "platform.hpp"
 #include "mpcc_script.hpp"
 #include <zstd.h>
 #include <cryptopp/cryptlib.h>
@@ -16,6 +17,20 @@
 #include <cstring>
 #include <iostream>
 #include <stdlib.h>
+
+#include <exception>
+
+class DArchiveException : public std::exception {
+private:
+    std::string desc;
+
+public:
+    DArchiveException(const std::string desc) : desc("DArchive: " + desc) {}
+
+    const char* what() const noexcept {
+        return desc.c_str();
+    }
+};
 
 #ifdef _WIN32
 # include <windows.h>
@@ -37,8 +52,7 @@ char* get_system_proxy_for_curl() {
 
     if (env_proxy) {
         proxy_string = _strdup(env_proxy);
-        if (proxy_string) {
-            if (proxy_string) printf("Detected http_proxy: %s\n", proxy_string);
+        if (proxy_string) { 
             return proxy_string;
         } else {
             return NULL;
@@ -56,7 +70,6 @@ char* get_system_proxy_for_curl() {
                 proxy_string = (char*)malloc(buffer_len);
                 if (proxy_string) {
                     WideCharToMultiByte(CP_UTF8, 0, ieProxyConfig.lpszProxy, -1, proxy_string, buffer_len, NULL, NULL);
-                    printf("Detected IE Proxy: %s\n", proxy_string);
                 }
             }
         }
@@ -73,7 +86,6 @@ char* get_system_proxy_for_curl() {
                     proxy_string = (char*)malloc(buffer_len);
                     if (proxy_string) {
                         WideCharToMultiByte(CP_UTF8, 0, proxyInfo.lpszProxy, -1, proxy_string, buffer_len, NULL, NULL);
-                        printf("Detected WinHTTP Proxy: %s\n", proxy_string);
                     }
                 }
             }
@@ -90,14 +102,14 @@ char* get_system_proxy_for_curl() {
 std::pair<size_t, unsigned char*> DArchive::decompress_data(const unsigned char* in, size_t len) {
     size_t decompressBound = ZSTD_getFrameContentSize(in, len);
     if (decompressBound == ZSTD_CONTENTSIZE_ERROR) {
-        return {0, nullptr};
+        throw DArchiveException("Failed to get decompression size.");
     }
     unsigned char* out = new unsigned char[decompressBound];
 
     size_t actualSize = ZSTD_decompress(out, decompressBound, in, len);
     if (ZSTD_isError(actualSize)) {
         delete[] out;
-        return {0, nullptr};
+        throw DArchiveException("Decompression failed: " + std::string(ZSTD_getErrorName(actualSize)));
     }
 
     return {actualSize, out};
@@ -122,36 +134,44 @@ std::pair<size_t, unsigned char*> DArchive::decrypt_data(const unsigned char* in
         password = keys[kix];
     }
     else {
-        std::cout << "Password #" << kix <<": ";
-        std::cin >> password;
-        keys.insert({kix, password});
+        if (!onMissingPassword(kix)) {
+            throw DArchiveException("Missing password for key index: " + std::to_string(kix));
+        }
+        else password = keys[kix];
     }
 
-    SecByteBlock key(KEY_SIZE);
-    PKCS5_PBKDF2_HMAC<SHA256> pbkdf;
-    pbkdf.DeriveKey(
-        key, key.size(),
-        0,
-        (const byte*) password.data(), password.size(),
-        salt, SALT_SIZE,
-        PBKDF2_ITERATIONS
-    );
+    while (true) {
+        try {
+            SecByteBlock key(KEY_SIZE);
+            PKCS5_PBKDF2_HMAC<SHA256> pbkdf;
+            pbkdf.DeriveKey(
+                key, key.size(),
+                0,
+                (const byte*) password.data(), password.size(),
+                salt, SALT_SIZE,
+                PBKDF2_ITERATIONS
+            );
 
-    CBC_Mode<AES>::Decryption dec;
-    dec.SetKeyWithIV(key, key.size(), iv);
+            CBC_Mode<AES>::Decryption dec;
+            dec.SetKeyWithIV(key, key.size(), iv);
 
-    std::string recovered;
-    StringSource ss(cipherData, cipherLen, true,
-        new StreamTransformationFilter(dec,
-            new StringSink(recovered)
-        )
-    );
+            std::string recovered;
+            StringSource ss(cipherData, cipherLen, true,
+                new StreamTransformationFilter(dec,
+                    new StringSink(recovered)
+                )
+            );
 
-    size_t dataSize = recovered.size();
-    unsigned char* out = new unsigned char[dataSize];
-    std::memcpy(out, recovered.data(), dataSize);
-
-    return {dataSize, out};
+            size_t dataSize = recovered.size();
+            unsigned char* out = new unsigned char[dataSize];
+            std::memcpy(out, recovered.data(), dataSize);
+            return {dataSize, out};
+        }
+        catch (const Exception& e) {
+            if (onIncorrectPassword(kix)) password = keys[kix];
+            else throw DArchiveException(std::string("Decryption failed: ") + e.what());
+        }
+    }
 }
 
 size_t write_data(void* ptr, size_t size, size_t nmemb, void* stream) {
@@ -167,19 +187,16 @@ bool DArchive::download(std::string url, std::filesystem::path save) {
     
     CURL* curl = curl_easy_init();
     if (!curl) {
-        std::cerr << "Download file failed: Unable to initialize CURL.\n";
-        return false;
+        throw DArchiveException("Download file failed: Unable to initialize CURL.");
     }
 
-    std::ofstream out(save, std::ios::binary);
+    std::ofstream out(toPlatformPath(save), std::ios::binary);
     if (!out) {
-        std::cerr << "Download file failed: Unable to open the output file.\n";
-        return false;
+        throw DArchiveException("Download file failed: Unable to open the output file.");
     }
 
     char* _p = get_system_proxy_for_curl();
     curl_easy_setopt(curl, CURLOPT_PROXY, _p);
-    if (!curlState && _p) printf("Using proxy server: %s\n", _p);
 
     if (!curlState) curlState = true;
 
@@ -193,9 +210,8 @@ bool DArchive::download(std::string url, std::filesystem::path save) {
     out.close();
 
     if (res != CURLE_OK) {
-        std::cerr << "Download file failed: Download failed.\n";
-        std::filesystem::remove(save);
-        return false;
+        std::filesystem::remove(toPlatformPath(save));
+        throw DArchiveException("Download file failed: Download failed.");
     }
 
     return true;
@@ -204,8 +220,7 @@ bool DArchive::download(std::string url, std::filesystem::path save) {
 std::pair<size_t, unsigned char*> DArchive::extractData(unsigned int fsid, unsigned char& prop) {
     if (fsid >= fileCount) {
         good = false;
-        std::cerr << "FSID is out of the range.\n";
-        return {0, nullptr};
+        throw DArchiveException("FSID is out of the range.");
     }
 
     is.seekg(fileOffsets[fsid], std::ios::beg);
@@ -320,7 +335,7 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
         if (size != 4) {
             good = false;
             delete[] data;
-            return;
+            throw DArchiveException("Invalid symlink data size.");
         }
         for (unsigned int i = 0; i < 4; i++) {
             nfsid |= (((unsigned int) data[i]) << (i << 3));
@@ -332,15 +347,25 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
 
     if (prop & Conf::PATH) {
         std::cout << "Create   " << path.lexically_normal().generic_u8string() << '\n';
-        std::filesystem::create_directory(path, ec);
+        std::filesystem::create_directory(toPlatformPath(path), ec);
         if (ec) {
             good = false;
             delete[] data;
-            return;
+            throw DArchiveException("Failed to create directory: " + ec.message());
+        }
+        if (size < 4) {
+            good = false;
+            delete[] data;
+            throw DArchiveException("Invalid directory data size.");
         }
         unsigned int count = 0, nfsid;
         for (unsigned int i = 0; i < 4; i++) {
             count |= (((unsigned int) data[i]) << (i << 3));
+        }
+        if (size != 4 + (count << 2)) {
+            good = false;
+            delete[] data;
+            throw DArchiveException("Invalid directory data size.");
         }
         for (unsigned int i = 0; i < count; i++) {
             nfsid = 0;
@@ -350,12 +375,12 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
             if (nfsid >= fileCount) {
                 good = false;
                 delete[] data;
-                return;
+                throw DArchiveException("FSID is out of the range in directory extraction.");
             }
             Extract(nfsid, path / std::filesystem::u8path(fileNames[nfsid]));
             if (!good) {
                 delete[] data;
-                return;
+                throw DArchiveException("Failed to extract directory contents.");
             }
         }
         delete[] data;
@@ -389,8 +414,8 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
         delete[] data;
         std::cout << "Download " << path.lexically_normal().generic_u8string() << " (" << url << ")\n";
         if (!download(url, path)) {
-            std::cerr << "Leaving the URL...\n";
-            std::ofstream os(path, std::ios::binary);
+            std::cout << "Leaving the URL...\n";
+            std::ofstream os(toPlatformPath(path), std::ios::binary);
             os.write(url.data(), url.size());
             os.close();
         }
@@ -398,7 +423,7 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
     }
 
     std::cout << "Extract  " << path.lexically_normal().generic_u8string() << '\n';
-    std::ofstream os(path, std::ios::binary);
+    std::ofstream os(toPlatformPath(path), std::ios::binary);
     os.write((char*) data, size);
     os.close();
 
@@ -472,11 +497,8 @@ unsigned int DArchive::DumpFSID(std::filesystem::path path) {
 }
 
 void DArchive::SetKey(unsigned int key, std::string val) {
-    if (keys.find(key) != keys.end()) {
-        good = false;
-        return;
-    }
-    keys.insert({key, val});
+    if (keys.find(key) != keys.end()) keys[key] = val;
+    else keys.insert({key, val});
 }
 
 void DArchive::PostExtract() {
@@ -601,27 +623,21 @@ DArchive::DArchive(std::string name) {
     good = true;
     fileCount = 0;
     safeMode = false;
-    is.open(name, std::ios::binary);
+    is.open(toPlatformPath(name), std::ios::binary);
     unsigned char header[16];
     is.read((char*) header, 16);
     if (std::string((char*) header, 4) != "MKAR") {
-        good = false;
-        std::cerr << "Bad magic number.\n";
-        return;
+        throw DArchiveException("Invalid MKAR archive.");
     }
     unsigned short impl = (((unsigned short) header[5]) << 8) | header[4];
     unsigned short ver = (((unsigned short) header[7]) << 8) | header[6];
     std::cout << "Implementation: " << impl << "\nStandard Version: " << ver << '\n';
     arcVersion = ver;
     if (impl != 0x2009) {
-        good = false;
-        std::cerr << "Incompatible implementation.\n";
-        return;
+        throw DArchiveException("Incompatible implementation.");
     }
     if (ver > 2) {
-        good = false;
-        std::cerr << "Incompatible standard version.\n";
-        return;
+        throw DArchiveException("Incompatible standard version.");
     }
 
     fstOffset = 0;

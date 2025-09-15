@@ -5,6 +5,7 @@
 #include <map>
 #include <fstream>
 #include <queue>
+#include <functional>
 
 class EArchive {
 private:
