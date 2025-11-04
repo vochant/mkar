@@ -198,7 +198,7 @@ void EArchive::AddPath(std::filesystem::path path, unsigned int fsid) {
         fsize = nfsize;
     }
 
-    std::cout << "Add " << path.lexically_normal().generic_u8string() << '\n';
+    std::cout << "Add " << path.lexically_normal().generic_u8string() << std::endl;
     mask.mask(content, fsize);
     mask.mask(content, fsize);
     mask.mask(content, fsize);
@@ -225,7 +225,7 @@ bool EArchive::isGood() { return good; }
 
 void EArchive::FSTable() {
     std::cout << "Added " << fileCount << " files\n";
-    std::cout << "Creating the FS Table\n";
+    std::cout << "Creating the FS Table" << std::endl;
     for (unsigned int i = 0; i < fileCount; i++) {
         unsigned short fnsize = fileNames[i].length();
         for (size_t j = 0; j < 2; j++) {
@@ -247,7 +247,7 @@ void EArchive::FSTable() {
 
     os.seekp(8, std::ios::beg);
     unsigned long long fstOffset = prevSize;
-    std::cout << "Offset: " << fstOffset << '\n';
+    std::cout << "Offset: " << fstOffset << std::endl;
     for (size_t j = 0; j < 8; j++) {
         unsigned char ch = (fstOffset >> (j << 3)) & 0xff;
         os.write((char*) &ch, 1);

@@ -36,6 +36,7 @@ public:
 # include <windows.h>
 # include <winhttp.h>
 # pragma comment(lib, "winhttp.lib")
+# define strdup _strdup
 #endif
 
 char* proxy_string = NULL;
@@ -51,7 +52,7 @@ char* get_system_proxy_for_curl() {
     }
 
     if (env_proxy) {
-        proxy_string = _strdup(env_proxy);
+        proxy_string = strdup(env_proxy);
         if (proxy_string) { 
             return proxy_string;
         } else {
@@ -295,7 +296,7 @@ void DArchive::FSTable() {
         fileSizes.push_back(fileOffsets[i + 1] - fileOffsets[i] - 225);
     }
 
-    std::cout << "Got " << fileCount << " files.\n";
+    std::cout << "Got " << fileCount << " files." << std::endl;
 }
 
 void DArchive::TestRootdir() {
@@ -346,7 +347,7 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
     }
 
     if (prop & Conf::PATH) {
-        std::cout << "Create   " << path.lexically_normal().generic_u8string() << '\n';
+        std::cout << "Create   " << path.lexically_normal().generic_u8string() << std::endl;
         std::filesystem::create_directory(toPlatformPath(path), ec);
         if (ec) {
             good = false;
@@ -399,7 +400,7 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
             }
             std::string script((char*) (data + 4), size - 4);
             if (pri == 0) {
-                std::cout << "Execute  " << path.lexically_normal().generic_u8string() << '\n';
+                std::cout << "Execute  " << path.lexically_normal().generic_u8string() << std::endl;
                 RunPostScript(script, path.lexically_normal().generic_u8string());
             }
             else tasks.push_back({pri, script, path.lexically_normal().generic_u8string()});
@@ -412,9 +413,9 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
         while (isspace(data[size - 1])) size--;
         std::string url((char*) data, size);
         delete[] data;
-        std::cout << "Download " << path.lexically_normal().generic_u8string() << " (" << url << ")\n";
+        std::cout << "Download " << path.lexically_normal().generic_u8string() << " (" << url << ')' << std::endl;
         if (!download(url, path)) {
-            std::cout << "Leaving the URL...\n";
+            std::cout << "Leaving the URL..." << std::endl;
             std::ofstream os(toPlatformPath(path), std::ios::binary);
             os.write(url.data(), url.size());
             os.close();
@@ -422,7 +423,7 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
         return;
     }
 
-    std::cout << "Extract  " << path.lexically_normal().generic_u8string() << '\n';
+    std::cout << "Extract  " << path.lexically_normal().generic_u8string() << std::endl;
     std::ofstream os(toPlatformPath(path), std::ios::binary);
     os.write((char*) data, size);
     os.close();
@@ -506,7 +507,7 @@ void DArchive::PostExtract() {
         return std::get<0>(a) > std::get<0>(b);
     });
     for (auto[pri, src, title] : tasks) {
-        std::cout << "Execute  " << src << '\n';
+        std::cout << "Execute  " << src << std::endl;
         RunPostScript(src, title);
     }
 }
@@ -631,7 +632,7 @@ DArchive::DArchive(std::string name) {
     }
     unsigned short impl = (((unsigned short) header[5]) << 8) | header[4];
     unsigned short ver = (((unsigned short) header[7]) << 8) | header[6];
-    std::cout << "Implementation: " << impl << "\nStandard Version: " << ver << '\n';
+    std::cout << "Implementation: " << impl << "\nStandard Version: " << ver << std::endl;
     arcVersion = ver;
     if (impl != 0x2009) {
         throw DArchiveException("Incompatible implementation.");
@@ -645,7 +646,7 @@ DArchive::DArchive(std::string name) {
         fstOffset |= (((unsigned long long) header[i + 8]) << (i << 3));
     }
 
-    std::cout << "Offset: " << fstOffset << '\n';
+    std::cout << "Offset: " << fstOffset << std::endl;
 }
 
 DArchive::~DArchive() {
