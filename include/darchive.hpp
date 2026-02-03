@@ -30,7 +30,6 @@ private:
     std::vector<size_t> fileSizes;
     std::vector<size_t> fileOffsets;
     std::map<unsigned int, std::string> keys;
-    std::vector<std::tuple<unsigned int, std::string, std::string>> tasks;
     std::ifstream is;
     bool good, safeMode, curlState;
     int arcVersion;
@@ -48,7 +47,6 @@ public:
     void ExtractAll();
     unsigned int DumpFSID(std::filesystem::path path);
     void SetKey(unsigned int key, std::string val);
-    void PostExtract();
     void Safe();
     void AddRoutine(unsigned int fsid, std::filesystem::path path);
     void RunRoutines();

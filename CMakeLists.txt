@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.5)
-project(mpcc LANGUAGES CXX VERSION 0.1.0)
+project(minmkar LANGUAGES CXX VERSION 0.1.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,22 +16,6 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY lib)
 
 # src
 set(LIBRARY_SOURCES
-    src/ast/ast.cpp
-    src/env/environment.cpp
-    src/lexer/token.cpp
-    src/lexer/lexer.cpp
-    src/parser/parser.cpp
-    src/util.cpp
-    src/object/object.cpp
-    src/program/program.cpp
-    src/vm/vm.cpp
-    src/vm/gct.cpp
-    src/plugins/plugin.cpp
-    src/plugins/base.cpp
-    src/plugins/io.cpp
-    src/plugins/math.cpp
-    src/plugins/fileio.cpp
-    src/plugins/mkar.cpp
     src/common.cpp
     src/earchive.cpp
     src/darchive.cpp
@@ -40,19 +24,16 @@ set(LIBRARY_SOURCES
 
 set(PROGRAM_SOURCES src/main.cpp)
 
-add_library(libmkar SHARED ${LIBRARY_SOURCES})
+add_library(libmkar STATIC ${LIBRARY_SOURCES})
 target_include_directories(libmkar PUBLIC
     include
     ${PROJECT_BINARY_DIR}
 )
 
-set_target_properties(libmkar PROPERTIES OUTPUT_NAME "mkar")
-
 find_package(zstd CONFIG REQUIRED)
 find_package(cryptopp CONFIG REQUIRED)
-find_package(CURL REQUIRED)
 
-target_link_libraries(libmkar PUBLIC zstd::libzstd cryptopp::cryptopp CURL::libcurl)
+target_link_libraries(libmkar PUBLIC zstd::libzstd cryptopp::cryptopp)
 
 add_executable(mkar ${PROGRAM_SOURCES})
 

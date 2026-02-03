@@ -2,7 +2,6 @@
 #include "conf.hpp"
 #include "mask.hpp"
 #include "platform.hpp"
-#include "mpcc_script.hpp"
 #include <zstd.h>
 #include <cryptopp/cryptlib.h>
 #include <cryptopp/aes.h>
@@ -13,10 +12,12 @@
 #include <cryptopp/osrng.h>
 #include <cryptopp/hex.h>
 #include <cryptopp/secblock.h>
-#include <curl/curl.h>
 #include <cstring>
 #include <iostream>
 #include <stdlib.h>
+
+std::function<bool(unsigned int)> onMissingPassword, onIncorrectPassword;
+DArchive* g_arch;
 
 #include <exception>
 
@@ -31,74 +32,6 @@ public:
         return desc.c_str();
     }
 };
-
-#ifdef _WIN32
-# include <windows.h>
-# include <winhttp.h>
-# pragma comment(lib, "winhttp.lib")
-# define strdup _strdup
-#endif
-
-char* proxy_string = NULL;
-bool proxy_detected = false;
-
-char* get_system_proxy_for_curl() {
-    if (proxy_detected) return proxy_string;
-    proxy_detected = true;
-
-    const char* env_proxy = getenv("http_proxy");
-    if (!env_proxy) {
-        env_proxy = getenv("https_proxy");
-    }
-
-    if (env_proxy) {
-        proxy_string = strdup(env_proxy);
-        if (proxy_string) { 
-            return proxy_string;
-        } else {
-            return NULL;
-        }
-    }
-
-#ifdef _WIN32
-    WINHTTP_CURRENT_USER_IE_PROXY_CONFIG ieProxyConfig;
-    ZeroMemory(&ieProxyConfig, sizeof(ieProxyConfig));
-
-    if (WinHttpGetIEProxyConfigForCurrentUser(&ieProxyConfig)) {
-        if (ieProxyConfig.lpszProxy) {
-            int buffer_len = WideCharToMultiByte(CP_UTF8, 0, ieProxyConfig.lpszProxy, -1, NULL, 0, NULL, NULL);
-            if (buffer_len > 0) {
-                proxy_string = (char*)malloc(buffer_len);
-                if (proxy_string) {
-                    WideCharToMultiByte(CP_UTF8, 0, ieProxyConfig.lpszProxy, -1, proxy_string, buffer_len, NULL, NULL);
-                }
-            }
-        }
-        if (ieProxyConfig.lpszAutoConfigUrl) GlobalFree(ieProxyConfig.lpszAutoConfigUrl);
-        if (ieProxyConfig.lpszProxy) GlobalFree(ieProxyConfig.lpszProxy);
-        if (ieProxyConfig.lpszProxyBypass) GlobalFree(ieProxyConfig.lpszProxyBypass);
-    } else {
-        WINHTTP_PROXY_INFO proxyInfo;
-        ZeroMemory(&proxyInfo, sizeof(proxyInfo));
-        if (WinHttpGetDefaultProxyConfiguration(&proxyInfo)) {
-            if (proxyInfo.lpszProxy) {
-                int buffer_len = WideCharToMultiByte(CP_UTF8, 0, proxyInfo.lpszProxy, -1, NULL, 0, NULL, NULL);
-                if (buffer_len > 0) {
-                    proxy_string = (char*)malloc(buffer_len);
-                    if (proxy_string) {
-                        WideCharToMultiByte(CP_UTF8, 0, proxyInfo.lpszProxy, -1, proxy_string, buffer_len, NULL, NULL);
-                    }
-                }
-            }
-            if (proxyInfo.lpszProxy) GlobalFree(proxyInfo.lpszProxy);
-            if (proxyInfo.lpszProxyBypass) GlobalFree(proxyInfo.lpszProxyBypass);
-        }
-    }
-#endif
-
-    return proxy_string;
-}
-
 
 std::pair<size_t, unsigned char*> DArchive::decompress_data(const unsigned char* in, size_t len) {
     size_t decompressBound = ZSTD_getFrameContentSize(in, len);
@@ -179,43 +112,6 @@ size_t write_data(void* ptr, size_t size, size_t nmemb, void* stream) {
     std::ofstream& out = *reinterpret_cast<std::ofstream*>(stream);
     out.write((char*)ptr, size * nmemb);
     return size * nmemb;
-}
-
-bool DArchive::download(std::string url, std::filesystem::path save) {
-    if (!curlState) {
-        curl_global_init(CURL_GLOBAL_DEFAULT);
-    }
-    
-    CURL* curl = curl_easy_init();
-    if (!curl) {
-        throw DArchiveException("Download file failed: Unable to initialize CURL.");
-    }
-
-    std::ofstream out(toPlatformPath(save), std::ios::binary);
-    if (!out) {
-        throw DArchiveException("Download file failed: Unable to open the output file.");
-    }
-
-    char* _p = get_system_proxy_for_curl();
-    curl_easy_setopt(curl, CURLOPT_PROXY, _p);
-
-    if (!curlState) curlState = true;
-
-    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_data);
-    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &out);
-
-    CURLcode res = curl_easy_perform(curl);
-    curl_easy_cleanup(curl);
-
-    out.close();
-
-    if (res != CURLE_OK) {
-        std::filesystem::remove(toPlatformPath(save));
-        throw DArchiveException("Download file failed: Download failed.");
-    }
-
-    return true;
 }
 
 std::pair<size_t, unsigned char*> DArchive::extractData(unsigned int fsid, unsigned char& prop) {
@@ -394,39 +290,22 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
             size -= 4;
         }
         else {
-            unsigned int pri;
-            for (unsigned int i = 0; i < 4; i++) {
-                pri |= (((unsigned int) data[i]) << (i << 3));
-            }
-            std::string script((char*) (data + 4), size - 4);
-            if (pri == 0) {
-                std::cout << "Execute  " << path.lexically_normal().generic_u8string() << std::endl;
-                RunPostScript(script, path.lexically_normal().generic_u8string());
-            }
-            else tasks.push_back({pri, script, path.lexically_normal().generic_u8string()});
             delete[] data;
-            return;
+            throw DArchiveException("Not Implemented: Script execution is not implemented in litemkar.");
         }
     }
 
     if ((prop & Conf::NETWORK) && !safeMode) {
-        while (isspace(data[size - 1])) size--;
-        std::string url((char*) data, size);
         delete[] data;
-        std::cout << "Download " << path.lexically_normal().generic_u8string() << " (" << url << ')' << std::endl;
-        if (!download(url, path)) {
-            std::cout << "Leaving the URL..." << std::endl;
-            std::ofstream os(toPlatformPath(path), std::ios::binary);
-            os.write(url.data(), url.size());
-            os.close();
-        }
-        return;
+        throw DArchiveException("Not Implemented: Network file is not implemented in litemkar.");
     }
 
     std::cout << "Extract  " << path.lexically_normal().generic_u8string() << std::endl;
     std::ofstream os(toPlatformPath(path), std::ios::binary);
     os.write((char*) data, size);
     os.close();
+
+    if (prop & Conf::SCRIPT && safeMode) data -= 4; 
 
     delete[] data;
 }
@@ -500,16 +379,6 @@ unsigned int DArchive::DumpFSID(std::filesystem::path path) {
 void DArchive::SetKey(unsigned int key, std::string val) {
     if (keys.find(key) != keys.end()) keys[key] = val;
     else keys.insert({key, val});
-}
-
-void DArchive::PostExtract() {
-    sort(tasks.begin(), tasks.end(), [](std::tuple<unsigned int, std::string, std::string> a, std::tuple<unsigned int, std::string, std::string> b) {
-        return std::get<0>(a) > std::get<0>(b);
-    });
-    for (auto[pri, src, title] : tasks) {
-        std::cout << "Execute  " << src << std::endl;
-        RunPostScript(src, title);
-    }
 }
 
 void DArchive::ExtractAll() {
@@ -650,6 +519,5 @@ DArchive::DArchive(std::string name) {
 }
 
 DArchive::~DArchive() {
-    if (curlState) curl_global_cleanup();
     is.close();
 }
