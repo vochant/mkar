@@ -428,6 +428,8 @@ void DArchive::Extract(unsigned int fsid, std::filesystem::path path) {
     os.write((char*) data, size);
     os.close();
 
+    if (prop & Conf::SCRIPT && safeMode) data -= 4; 
+
     delete[] data;
 }
 

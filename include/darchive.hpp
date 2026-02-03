@@ -61,7 +61,5 @@ public:
     ~DArchive();
 };
 
-extern LIB_API DArchive* g_arch;
-extern LIB_API std::function<bool(unsigned int)> onMissingPassword, onIncorrectPassword;
-
-#undef LIB_API
+extern std::function<bool(unsigned int)> onMissingPassword, onIncorrectPassword;
+extern DArchive* g_arch;

@@ -1,5 +1,3 @@
-
-
 #include <iostream>
 
 #ifdef _WIN32
@@ -83,7 +81,7 @@ int main(int argc, char* argv[]) {
                     catch (const std::exception& e) {
                         std::cerr << "Error while parsing ExecPri: " << e.what() << '\n';
                         return 1;
-                    }
+                    } 
                     i += 2;
                 }
                 else if (str == "-n") {
